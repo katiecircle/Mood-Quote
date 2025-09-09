@@ -17,7 +17,13 @@ export function Home({ onQuoteGenerated }: HomeProps) {
   const predefinedMoods = getPredefinedMoods();
 
   const handleMoodBadgeClick = (moodKey: string) => {
+    // Update input value for visibility
     setMood(moodKey);
+
+    // Immediately generate a quote and navigate
+    const result = getQuoteForMood(moodKey);
+    onQuoteGenerated(result.quote, moodKey, result.moodData);
+    setLocation("/quote");
   };
 
   const handleGetQuote = () => {
