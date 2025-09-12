@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { RotateCcw, Copy, CheckCircle } from "lucide-react";
+import { RotateCcw, Copy, CheckCircle, Heart } from "lucide-react";
+import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import { getDeviceId } from "@/lib/utils";
 
 interface Quote {
   text: string;
@@ -27,12 +29,54 @@ export function QuoteResult({ quote, mood, moodData, onTryAnother }: QuoteResult
   const [, setLocation] = useLocation();
   const [copySuccess, setCopySuccess] = useState(false);
   const { toast } = useToast();
+  const [isFavorited, setIsFavorited] = useState(false);
 
   useEffect(() => {
     if (!quote) {
       setLocation("/");
     }
   }, [quote, setLocation]);
+
+  useEffect(() => {
+    if (!quote) return;
+    
+    const checkIfFavorited = async () => {
+      // Check Supabase first if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const supabase = getSupabaseClient();
+          const deviceId = getDeviceId();
+          if (supabase) {
+            const { data, error } = await supabase
+              .from("favorites")
+              .select("id")
+              .eq("device_id", deviceId)
+              .eq("text", quote.text)
+              .eq("author", quote.author)
+              .single();
+            if (!error && data) {
+              setIsFavorited(true);
+              return;
+            }
+          }
+        } catch (_e) {
+          // fall back to local
+        }
+      }
+
+      // Fallback: localStorage
+      try {
+        const raw = localStorage.getItem("favoriteQuotes");
+        const favorites: Array<{ text: string; author: string }> = raw ? JSON.parse(raw) : [];
+        const exists = favorites.some((q) => q.text === quote.text && q.author === quote.author);
+        setIsFavorited(exists);
+      } catch (_e) {
+        // ignore parse errors
+      }
+    };
+
+    checkIfFavorited();
+  }, [quote]);
 
   const handleTryAnother = () => {
     onTryAnother();
@@ -73,6 +117,107 @@ export function QuoteResult({ quote, mood, moodData, onTryAnother }: QuoteResult
       setTimeout(() => {
         setCopySuccess(false);
       }, 3000);
+    }
+  };
+
+  const handleFavoriteQuote = async () => {
+    if (!quote) return;
+
+    const deviceId = getDeviceId();
+    const moodLabel = moodData?.label;
+
+    // If already favorited, remove it
+    if (isFavorited) {
+      // Try Supabase first if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            const { error } = await supabase
+              .from("favorites")
+              .delete()
+              .eq("device_id", deviceId)
+              .eq("text", quote.text)
+              .eq("author", quote.author);
+            if (error) throw error;
+            setIsFavorited(false);
+            toast({ title: "Removed from favorites", description: "Quote removed from your favorites." });
+            window.dispatchEvent(new Event("favoritesUpdated"));
+            return;
+          }
+        } catch (_e) {
+          // fall through to local storage
+        }
+      }
+
+      // Fallback: localStorage
+      try {
+        const raw = localStorage.getItem("favoriteQuotes");
+        const favorites: Array<{ text: string; author: string; mood?: string }> = raw ? JSON.parse(raw) : [];
+        const updated = favorites.filter(
+          (q) => !(q.text === quote.text && q.author === quote.author)
+        );
+        localStorage.setItem("favoriteQuotes", JSON.stringify(updated));
+        window.dispatchEvent(new Event("favoritesUpdated"));
+        setIsFavorited(false);
+        toast({ title: "Removed from favorites", description: "Quote removed from your favorites." });
+      } catch (_e) {
+        toast({ title: "Could not remove favorite", description: "Storage failed. Please try again." });
+      }
+      return;
+    }
+
+    // Add to favorites
+    // Try Supabase first if configured
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          // Upsert to avoid duplicates per device
+          const { error } = await supabase
+            .from("favorites")
+            .upsert(
+              {
+                device_id: deviceId,
+                text: quote.text,
+                author: quote.author,
+                mood: moodLabel || null,
+              },
+              {
+                onConflict: "device_id,text,author",
+              }
+            );
+          if (error) throw error;
+          setIsFavorited(true);
+          toast({ title: "Saved to favorites", description: "Stored securely in the cloud." });
+          window.dispatchEvent(new Event("favoritesUpdated"));
+          return;
+        }
+      } catch (_e) {
+        // fall through to local storage
+      }
+    }
+
+    // Fallback: localStorage
+    try {
+      const raw = localStorage.getItem("favoriteQuotes");
+      const favorites: Array<{ text: string; author: string; mood?: string }> = raw ? JSON.parse(raw) : [];
+      const already = favorites.some((q) => q.text === quote.text && q.author === quote.author);
+      if (already) {
+        setIsFavorited(true);
+        toast({ title: "Already in favorites", description: "This quote is already saved." });
+        return;
+      }
+      const updated = [
+        { text: quote.text, author: quote.author, mood: moodLabel },
+        ...favorites,
+      ].slice(0, 100);
+      localStorage.setItem("favoriteQuotes", JSON.stringify(updated));
+      window.dispatchEvent(new Event("favoritesUpdated"));
+      setIsFavorited(true);
+      toast({ title: "Saved to favorites", description: "Saved on this device." });
+    } catch (_e) {
+      toast({ title: "Could not save favorite", description: "Storage failed. Please try again." });
     }
   };
 
@@ -119,6 +264,19 @@ export function QuoteResult({ quote, mood, moodData, onTryAnother }: QuoteResult
           Try Another Mood
         </Button>
         
+        <Button
+          onClick={handleFavoriteQuote}
+          className={`inline-flex items-center justify-center px-6 py-3 transition-all font-medium ${
+            isFavorited 
+              ? "bg-red-500 hover:bg-red-600 text-white" 
+              : "bg-pink-500 hover:bg-pink-600 text-white"
+          }`}
+          data-testid="button-favorite-quote"
+        >
+          <Heart className={`mr-2 h-4 w-4 ${isFavorited ? "fill-current" : ""}`} />
+          {isFavorited ? "Remove" : "Favorite"}
+        </Button>
+
         <Button
           onClick={handleCopyQuote}
           className="inline-flex items-center justify-center px-6 py-3 gradient-bg text-primary-foreground hover:opacity-90 transition-all font-medium"

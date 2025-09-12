@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Header } from "@/components/header";
+import { FavoritesPanel } from "@/components/favorites-panel";
 import { Home } from "@/pages/home";
 import { QuoteResult } from "@/pages/quote-result";
 import NotFound from "@/pages/not-found";
@@ -60,9 +61,14 @@ function App() {
       <TooltipProvider>
         <div className="min-h-screen bg-background text-foreground font-sans flex flex-col">
           <Header />
-          <main className="relative z-10 flex-1 flex items-center justify-center px-6 py-12">
-            <div className="w-full max-w-2xl mx-auto">
-              <Router />
+          <main className="relative z-10 flex-1 px-6 py-12">
+            <div className="w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+              <div className="lg:col-span-2">
+                <Router />
+              </div>
+              <aside className="hidden lg:block sticky top-8">
+                <FavoritesPanel />
+              </aside>
             </div>
           </main>
           <footer className="relative z-10 w-full px-6 py-8 mt-auto">
